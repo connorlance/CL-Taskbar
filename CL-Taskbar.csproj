@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Build on Windows with the .NET SDK:  dotnet build -c Release
+       The result runs on the .NET Framework 4.8 that's built into Windows 10 and 11. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <LangVersion>9</LangVersion>
+    <AssemblyName>CL-Taskbar</AssemblyName>
+    <RootNamespace>CLTaskbar</RootNamespace>
+    <ApplicationManifest>src\app.manifest</ApplicationManifest>
+    <ApplicationIcon>src\app.ico</ApplicationIcon>
+    <AppConfig>src\App.config</AppConfig>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Web.Extensions" />
+  </ItemGroup>
+</Project>
