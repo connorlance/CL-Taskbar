@@ -415,12 +415,20 @@ namespace CLTaskbar
 
         static string AppPath(string exe, string programFilesRel)
         {
+            // A Microsoft Store copy registers itself here too (often per-user, so it's found first).
+            // It has its own separate profile, so prefer a regular install and use the Store copy only if there's nothing else.
+            string store = null;
             foreach (var hive in new[] { Registry.CurrentUser, Registry.LocalMachine })
             {
                 try
                 {
                     using (var k = hive.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\" + exe))
-                        if (k?.GetValue(null) is string p && File.Exists(p.Trim('"'))) return p.Trim('"');
+                        if (k?.GetValue(null) is string v && File.Exists(v.Trim('"')))
+                        {
+                            string p = v.Trim('"');
+                            if (p.IndexOf(@"\WindowsApps\", StringComparison.OrdinalIgnoreCase) >= 0) { if (store == null) store = p; }
+                            else return p;
+                        }
                 }
                 catch { }
             }
@@ -435,7 +443,7 @@ namespace CLTaskbar
                     if (File.Exists(p)) return p;
                 }
             }
-            return null;
+            return store;
         }
 
         static string DefaultBrowserExe()
