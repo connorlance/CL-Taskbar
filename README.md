@@ -27,7 +27,7 @@ Windows 10 and Windows 11. .NET Framework 4.8 (included with Windows).
 
 ## Installation
 
-1. Download `CL-Taskbar-v1.0.0.zip` from [Releases](../../releases/latest).
+1. Download `CL-Taskbar-v1.1.0.zip` from [Releases](../../releases/latest).
 2. Right-click the zip › Properties › check **Unblock** › OK. Without this, Windows SmartScreen shows a prompt on first launch (**More info › Run anyway**).
 3. Extract to a permanent folder and run `CL-Taskbar.exe`.
 
@@ -44,7 +44,7 @@ Settings and Exit are on the right-click menu of an empty spot on the bar, and o
 - Dragging an app onto another desktop's group moves the window to that desktop.
 - Drag to reorder. The order is saved per desktop.
 - Apps can be pinned to a specific desktop.
-- Window previews on hover.
+- Window previews on hover. Point at a preview to see that window on the screen.
 
 > Screenshot: Hover preview for an app with multiple windows.
 
