@@ -55,6 +55,7 @@ namespace CLTaskbar
             if (dragBtn != null && e.Button == MouseButtons.Left)
             {
                 if (!dragMoved && Math.Abs(e.X - dragStart.X) < S(6)) return;
+                if (!dragMoved) ClosePopups();   // pressing a menu button opened it; dragging the button closes it again
                 dragMoved = true;
                 preview.HidePopup();
                 previewTimer.Stop();
@@ -388,6 +389,7 @@ namespace CLTaskbar
         protected override void OnMouseDown(MouseEventArgs e)
         {
             pressed = HitTest(e.Location);
+            pressHandled = false;
             previewTimer.Stop();
             if (e.Button == MouseButtons.Left && pressed is BarButton b && CanDrag(b))
             {
@@ -396,6 +398,19 @@ namespace CLTaskbar
                 sectionDropIndex = -1;
                 Capture = true;
             }
+            if (e.Button == MouseButtons.Left && pressed is BarButton pb && (pb.Menu != null || pb.Tray != null))
+            {
+                // Menus and popup grids open the moment you press, not when you let go.
+                // Whether this press opens or closes it is decided now, while we still know what was open.
+                preview.HidePopup();
+                bool wasOpen = PopupOpenFor(pb);
+                if (wasOpen) ClosePopups();
+                else if (pb.Menu != null) ShowLaunchMenu(pb);   // (each closes whatever other menu or grid is open)
+                else ShowTrayFlyout(pb);
+                pressHandled = true;
+            }
+            else if (e.Button == MouseButtons.Left && TrayFlyoutOpen) trayFlyout.Close();   // clicked something else on the bar
+            menuClosedByClick = false;   // (this press was seen, so the fallback in OnMouseUp isn't needed)
             Invalidate();
         }
 
@@ -409,6 +424,8 @@ namespace CLTaskbar
 
         protected override void OnMouseUp(MouseEventArgs e)
         {
+            bool handled = pressHandled;   // the press already opened or closed a menu / grid
+            pressHandled = false;
             if (dragBtn != null)
             {
                 var db = dragBtn; bool moved = dragMoved; bool whole = dragSection; int sidx = sectionDropIndex;
@@ -425,6 +442,17 @@ namespace CLTaskbar
                 }
             }
             var target = HitTest(e.Location);
+            // If an open menu swallowed the press while closing (so we never saw it), treat this release as the click:
+            // on the same menu's button it was a "close", on any other menu or grid it should open that one
+            if (pressed == null && !handled && e.Button == MouseButtons.Left && target is BarButton sb && (sb.Menu != null || sb.Tray != null)
+                && menuClosedByClick && (DateTime.Now - menuClosedAt).TotalMilliseconds < 1500)
+            {
+                bool sameMenu = closedMenuKey == sb.Key;
+                menuClosedByClick = false; closedMenuKey = null;
+                Invalidate();
+                if (!sameMenu) { preview.HidePopup(); ClosePopups(); if (sb.Menu != null) ShowLaunchMenu(sb); else ShowTrayFlyout(sb); }
+                return;
+            }
             bool same = ReferenceEquals(target, pressed) || (target is BarButton tb && pressed is BarButton pb && tb.Key == pb.Key);
             pressed = null;
             Invalidate();
@@ -436,8 +464,8 @@ namespace CLTaskbar
             {
                 preview.HidePopup();
                 bool newInstance = e.Button == MouseButtons.Middle || (e.Button == MouseButtons.Left && (ModifierKeys & Keys.Shift) != 0);
-                if (b.Menu != null) { if (e.Button == MouseButtons.Left) ShowLaunchMenu(b); return; }
-                if (b.Tray != null) { if (e.Button == MouseButtons.Left) ShowTrayFlyout(b); return; }
+                if (b.Menu != null) { if (e.Button == MouseButtons.Left && !handled) ShowLaunchMenu(b); return; }
+                if (b.Tray != null) { if (e.Button == MouseButtons.Left && !handled) ShowTrayFlyout(b); return; }
                 if (b.DeskPin && (b.Windows.Count == 0 || newInstance)) { LaunchOnDesktop(b.Pin, b.Group.Desktop); return; }
                 if (b.Pin != null && !b.DeskPin) { OpenItem(b.Pin, b.Group.Section?.Browser); return; }
                 if (newInstance) { NewInstance(b.Windows[0]); return; }
@@ -480,6 +508,7 @@ namespace CLTaskbar
             {
                 if (b.Pin != null && b.Windows.Count == 0) { preview.ShowText("pin:" + b.Key, ItemTitle(b.Pin), ScreenRectOf(b), theme, scale); return; }
                 if ((b.Tray != null && trayFlyout != null && !trayFlyout.IsDisposed && trayFlyout.Visible && trayFlyout.Tag == b.Tray) || openMenuKey == b.Key) return;
+                if ((b.Tray != null || b.Menu != null) && !cfg.ShowGroupNames) { preview.HidePopup(); return; }   // their names on hover are optional (off by default)
                 if (b.Tray != null) { preview.ShowText("tray:" + b.Key, string.IsNullOrWhiteSpace(b.Tray.Name) ? "Group" : b.Tray.Name, ScreenRectOf(b), theme, scale); return; }
                 if (b.Menu != null) { preview.ShowText("menu:" + b.Key, string.IsNullOrWhiteSpace(b.Menu.Name) ? "Menu" : b.Menu.Name, ScreenRectOf(b), theme, scale); return; }
                 if (!cfg.ShowPreviews)
@@ -502,6 +531,7 @@ namespace CLTaskbar
         {
             IntPtr h = w.Hwnd;
             if (!Native.IsWindow(h)) { dirty = true; return; }
+            if (TrayFlyoutOpen) trayFlyout.Close();
             if (Native.IsIconic(h)) Native.ShowWindowAsync(h, Native.SW_RESTORE);
             if (!Native.SetForegroundWindow(h)) Native.SwitchToThisWindow(h, true);
 
@@ -524,6 +554,7 @@ namespace CLTaskbar
         // to the target desktop and activated, which makes Windows switch to that desktop.
         void SwitchDesktop(Guid id, IntPtr thenActivate)
         {
+            if (TrayFlyoutOpen) trayFlyout.Close();
             var helper = new Form
             {
                 FormBorderStyle = FormBorderStyle.None, ShowInTaskbar = true, StartPosition = FormStartPosition.Manual,
@@ -733,21 +764,53 @@ namespace CLTaskbar
 
         int MenuIcon => Math.Max(16, S(16));
 
-        // The Menu popup that's open (or just closed): clicking its button again closes it instead of reopening it
-        string openMenuKey, closedMenuKey;
+        // The menu or popup grid that's open, so a press on the bar can tell whether it opens or closes one
+        ContextMenuStrip openMenu;           // any menu shown from the bar (a Menu button's menu, or a right-click menu)
+        string openMenuKey, closedMenuKey;   // which Menu button it belongs to (null for right-click menus)
         DateTime menuClosedAt;
-        bool MenuJustClosed(string key) => closedMenuKey == key && (DateTime.Now - menuClosedAt).TotalMilliseconds < 400;
-        bool AnyMenuJustClosed => closedMenuKey != null && (DateTime.Now - menuClosedAt).TotalMilliseconds < 400;
+        bool menuClosedByClick;              // it closed because you clicked outside it (maybe on its own button)
+        bool pressHandled;                   // this press on the bar already opened or closed a menu / grid
 
-        void TrackMenu(ToolStripDropDown menu, string key)
+        bool TrayFlyoutOpen => trayFlyout != null && !trayFlyout.IsDisposed;
+
+        // Was this button's menu / grid open when the press started? An open menu closes itself the instant
+        // you press outside it (just before the bar hears about the press), so "closed a moment ago by a click" counts as open.
+        bool PopupOpenFor(BarButton b)
         {
+            if (b.Menu != null)
+                return (openMenu != null && openMenuKey == b.Key)
+                    || (closedMenuKey == b.Key && menuClosedByClick && (DateTime.Now - menuClosedAt).TotalMilliseconds < 250);
+            return TrayFlyoutOpen && trayFlyout.Tag == b.Tray;
+        }
+
+        void ClosePopups()
+        {
+            if (TrayFlyoutOpen) trayFlyout.Close();
+            if (openMenu != null && !openMenu.IsDisposed) openMenu.Close();
+        }
+
+        // Before a new menu opens: move the focus to the bar FIRST, then close the grid. Closing the grid while it has
+        // the focus lets Windows hand the focus to some other app, which then closes the new menu the moment it opens.
+        void ClosePopupsForNewMenu()
+        {
+            if (TrayFlyoutOpen) Native.SetForegroundWindow(Handle);
+            ClosePopups();
+        }
+
+        void TrackMenu(ContextMenuStrip menu, string key)
+        {
+            openMenu = menu;
             openMenuKey = key;
-            menu.Closed += (s, e) => { if (openMenuKey == key) openMenuKey = null; closedMenuKey = key; menuClosedAt = DateTime.Now; };
+            menu.Closed += (s, e) =>
+            {
+                if (openMenu == menu) { openMenu = null; openMenuKey = null; }
+                closedMenuKey = key; menuClosedAt = DateTime.Now;
+                menuClosedByClick = e.CloseReason == ToolStripDropDownCloseReason.AppClicked;
+            };
         }
 
         void ShowLaunchMenu(BarButton b)
         {
-            if (MenuJustClosed(b.Key)) { closedMenuKey = null; return; }   // this click just closed it
             var sec = b.Menu;
             // The menu's own colors and text size, if you set them
             var mt = theme.WithMenuColors(Theme.Parse(sec.MenuBackColor), Theme.Parse(sec.MenuTextColor), Theme.Parse(sec.MenuHoverColor));
@@ -762,8 +825,7 @@ namespace CLTaskbar
             }
             Menus.StyleTree(menu.Items, mt, scale, font);
             ApplySizes(menu.Items, sec);
-            TrackMenu(menu, b.Key);
-            ShowMenuAbove(menu, b, false);
+            ShowMenuAbove(menu, b, false, b.Key);
         }
 
         // Fixed item heights and menu width (per menu, or per item)
@@ -802,7 +864,7 @@ namespace CLTaskbar
                     {
                         int isz = ItemIconPx(it, sec);
                         var sub = Menus.Item(into, string.IsNullOrWhiteSpace(it.Name) ? "Folder" : it.Name,
-                            !string.IsNullOrWhiteSpace(it.IconPath) ? Launcher.IconFor(it, isz) : Launcher.IconForTarget("shell:Personal", isz), null);
+                            !string.IsNullOrWhiteSpace(it.IconPath) ? Launcher.IconFor(it, isz) : FolderIcon(isz), null);
                         Look(sub, it, sec);
                         AddLaunchItems(sub.DropDownItems, it.Children, browser, sec);
                         if (it.Children.Count == 0) sub.DropDownItems.Add(new ToolStripMenuItem("(empty)") { Enabled = false });
@@ -822,6 +884,56 @@ namespace CLTaskbar
         int ItemIconPx(LaunchItem it, BarSection sec) =>
             S(it.IconSize > 0 ? it.IconSize : sec != null && sec.MenuIconSize > 0 ? sec.MenuIconSize : 16);
 
+        // The plain folder icon for sub-menus, asked from Windows once per size
+        readonly Dictionary<int, Bitmap> folderIcons = new Dictionary<int, Bitmap>();
+        Bitmap FolderIcon(int px)
+        {
+            if (!folderIcons.TryGetValue(px, out var b)) { b = Launcher.IconForTarget("shell:Personal", px); if (b != null) folderIcons[px] = b; }
+            return b;
+        }
+
+        // Loads the icons of popup grids and menus ahead of time (shortly after starting and after a settings change),
+        // so opening one never has to wait for Windows to hand the icons over
+        Timer warmTimer;
+        void ScheduleIconWarmup()
+        {
+            if (warmTimer == null) { warmTimer = new Timer { Interval = 800 }; warmTimer.Tick += (s, e) => { warmTimer.Stop(); WarmPopupIcons(); }; }
+            warmTimer.Stop();
+            warmTimer.Start();
+        }
+
+        void WarmPopupIcons()
+        {
+            try
+            {
+                foreach (var sec in cfg.Layout)
+                {
+                    if (sec.Type == "pins" && sec.Style == "grid")
+                    {
+                        int px = (int)Math.Round((sec.GridIconSize > 0 ? sec.GridIconSize : 24) * scale);   // same size the grid draws
+                        foreach (var it in sec.Items) if (it.Type == "program" || it.Type == "web") Launcher.IconFor(it, px, sec.Browser);
+                    }
+                    else if (sec.Type == "menu") WarmMenuIcons(sec.Items, sec);
+                }
+            }
+            catch { }
+        }
+
+        void WarmMenuIcons(List<LaunchItem> items, BarSection sec)
+        {
+            foreach (var it in items)
+            {
+                if (it.Type == "separator") continue;
+                int px = ItemIconPx(it, sec);
+                if (it.Type == "folder")
+                {
+                    if (!string.IsNullOrWhiteSpace(it.IconPath)) Launcher.IconFor(it, px); else FolderIcon(px);
+                    WarmMenuIcons(it.Children, sec);
+                }
+                else Launcher.IconFor(it, px, sec.Browser);
+            }
+        }
+
         // Colors, bold text, and "picture only" for one menu item
         void Look(ToolStripMenuItem mi, LaunchItem it, BarSection sec)
         {
@@ -837,8 +949,9 @@ namespace CLTaskbar
             mi.Tag = look;
         }
 
-        void ShowMenuAbove(ContextMenuStrip menu, object anchorTarget, bool style = true)
+        void ShowMenuAbove(ContextMenuStrip menu, object anchorTarget, bool style = true, string key = null)
         {
+            ClosePopupsForNewMenu();   // only one menu or grid at a time
             if (style) Menus.StyleTree(menu.Items, theme, scale);
             // Take focus while the menu is open so it closes when you click elsewhere (the real taskbar does the same)
             Native.SetForegroundWindow(Handle);
@@ -848,6 +961,7 @@ namespace CLTaskbar
             int x = anchorTarget != null ? anchor.Left + anchor.Width / 2 - size.Width / 2 : anchor.Left;
             var work = Screen.FromPoint(new Point(anchor.Left + anchor.Width / 2, Top)).Bounds;
             x = Math.Max(work.Left + S(4), Math.Min(x, work.Right - S(4) - size.Width));
+            TrackMenu(menu, key);
             menu.Show(new Point(x, Top - S(4)), ToolStripDropDownDirection.AboveRight);
         }
 
@@ -916,21 +1030,16 @@ namespace CLTaskbar
 
         void ShowTrayFlyout(BarButton b)
         {
-            if (AnyMenuJustClosed)
-            {
-                // a menu was open and this click closed it: let it finish closing first, or it takes the focus
-                // back and the grid closes right away
-                closedMenuKey = null;
-                var t = new Timer { Interval = 120 };
-                t.Tick += (s, e) => { t.Dispose(); ShowTrayFlyout(b); };
-                t.Start();
-                return;
-            }
-            if (trayFlyout != null && !trayFlyout.IsDisposed) { bool same = trayFlyout.Tag == b.Tray; trayFlyout.Close(); if (same) return; }
+            if (TrayFlyoutOpen && trayFlyout.Tag == b.Tray) { trayFlyout.Close(); return; }   // its button again: close it
+            if (openMenu != null && !openMenu.IsDisposed) openMenu.Close();
+            // Open the new grid first and only then close another one that's open, so the focus goes straight
+            // from one to the other instead of passing through some other app (which would close the new one)
+            var old = TrayFlyoutOpen ? trayFlyout : null;
             trayFlyout = new TrayFlyout(this, b.Tray, theme, scale, ScreenRectOf(b)) { Tag = b.Tray };
             trayFlyout.Show();
             trayFlyout.Activate();
             Native.SetForegroundWindow(trayFlyout.Handle);
+            old?.Close();
         }
 
         public void OpenFromGrid(LaunchItem it, BarSection sec) => OpenItem(it, sec.Browser);
@@ -1027,6 +1136,7 @@ namespace CLTaskbar
 
         void ShowContextMenu(object target, Point clientPt)
         {
+            ClosePopupsForNewMenu();
             // Shift+right-click: Explorer's own full menu for the app.
             // With "Use Windows' own right-click menus for apps" on, a plain right-click shows Windows' normal menu too.
             bool shift = (ModifierKeys & Keys.Shift) != 0;
@@ -1199,9 +1309,8 @@ namespace CLTaskbar
             while (items.Count > 0 && items[0] is ToolStripSeparator) items.RemoveAt(0);
             if (items.Count == 0) AddBarItems(items);
             Menus.StyleTree(menu.Items, theme, scale);
-            TrackMenu(menu, "ctx:" + ((target as BarButton)?.Key ?? ""));
             if (cfg.NarrowWindowList && titleItems.Count > 0) FitTitles(menu, titleItems);
-            ShowMenuAbove(menu, target, false);
+            ShowMenuAbove(menu, target, false, "ctx:" + ((target as BarButton)?.Key ?? ""));
         }
 
         string DeskTitle(DesktopInfo d)

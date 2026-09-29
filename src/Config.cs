@@ -151,10 +151,12 @@ namespace CLTaskbar
         public int IconSize { get; set; } = 0;             // 0 = match Windows
         public int ButtonWidth { get; set; } = 0;          // 0 = match Windows
         public int SectionGap { get; set; } = 18;          // space between sections on the bar
-        public bool ShowDividers { get; set; } = true;
+        public bool ShowDividers { get; set; } = false;
         public bool HighlightCurrentDesktop { get; set; } = true;
         public bool ShowPreviews { get; set; } = true;
-        public int PreviewDelayMs { get; set; } = 350;
+        public int PreviewDelayMs { get; set; } = 0;
+        public bool ShowGroupNames { get; set; } = false;   // pointing at a popup grid or menu button shows its name
+        public bool PeekWindows { get; set; } = true;       // pointing at a window's preview shows that window on the screen
         public int LeftOffset { get; set; }
         public int RightOffset { get; set; }
 

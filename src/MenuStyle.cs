@@ -22,7 +22,7 @@ namespace CLTaskbar
         {
             var m = new ContextMenuStrip();
             Style(m, t, scale);
-            m.HandleCreated += (s, e) => { if (!Theme.IsWin10) Native.RoundCorners(m.Handle); };
+            m.HandleCreated += (s, e) => { Native.NoOpenAnimation(m.Handle); if (!Theme.IsWin10) Native.RoundCorners(m.Handle); };
             m.Closed += (s, e) => m.BeginInvoke((Action)(() => m.Dispose()));
             return m;
         }
@@ -54,7 +54,16 @@ namespace CLTaskbar
                     // not "above" like the taskbar menu they came from, which left a gap and pushed them upward
                     mi.DropDownDirection = ToolStripDropDownDirection.Right;
                     var dd = mi.DropDown;
-                    dd.HandleCreated += (s, e) => { if (!Theme.IsWin10) Native.RoundCorners(dd.Handle); };
+                    dd.HandleCreated += (s, e) => { Native.NoOpenAnimation(dd.Handle); if (!Theme.IsWin10) Native.RoundCorners(dd.Handle); };
+                    // Open the sub-menu as soon as you point at it (Windows otherwise waits about half a second)
+                    var sub = mi;
+                    sub.MouseEnter += (s, e) =>
+                    {
+                        if (!sub.Enabled || sub.DropDown.Visible || sub.Owner == null) return;
+                        foreach (ToolStripItem o in sub.Owner.Items)
+                            if (o != sub && o is ToolStripMenuItem om && om.HasDropDownItems && om.DropDown.Visible) om.HideDropDown();
+                        sub.ShowDropDown();
+                    };
                     StyleTree(mi.DropDownItems, t, scale, font);
                 }
                 Pad(it, scale);

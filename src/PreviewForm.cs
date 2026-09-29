@@ -32,6 +32,7 @@ namespace CLTaskbar
         public object Owner_Key;   // which bar button this popup is showing
         public Action<AppWindow> OnActivate;
         public Action<AppWindow> OnCloseWindow;
+        public Func<bool> PeekEnabled;   // the "show the window on the screen" setting
 
         public PreviewForm()
         {
@@ -42,6 +43,49 @@ namespace CLTaskbar
             DoubleBuffered = true;
             TopMost = true;
             poll.Tick += (s, e) => CheckMouse();
+            peekTimer.Tick += (s, e) => { peekTimer.Stop(); if (Visible) SetPeek(peekPending); };
+        }
+
+        // ---- peek: pointing at a preview shows just that window over the desktop, like the real taskbar ----
+        readonly Timer peekTimer = new Timer();
+        readonly PeekOverlay overlay = new PeekOverlay();
+        IntPtr peeked;        // the window shown on the screen right now
+        IntPtr peekPending;   // what the timer will show (Zero = stop)
+
+        void WantPeek(Tile t)
+        {
+            IntPtr target = t != null && CanPeek(t.Win.Hwnd) ? t.Win.Hwnd : IntPtr.Zero;
+            peekTimer.Stop();
+            if (target == peeked) return;
+            // Already peeking: go straight to the next one. Otherwise wait a moment first (so sweeping across
+            // the previews doesn't flash windows), and when leaving a preview wait briefly before stopping
+            // (so crossing the small gap to the next preview doesn't flicker).
+            if (target != IntPtr.Zero && peeked != IntPtr.Zero) { SetPeek(target); return; }
+            peekPending = target;
+            peekTimer.Interval = target != IntPtr.Zero ? 200 : 120;
+            peekTimer.Start();
+        }
+
+        void SetPeek(IntPtr target)
+        {
+            if (target == peeked) return;
+            if (target == IntPtr.Zero) overlay.Hide();
+            else overlay.Show(target, IsHandleCreated ? Handle : IntPtr.Zero);
+            peeked = target;
+        }
+
+        void StopPeek()
+        {
+            peekTimer.Stop();
+            peekPending = IntPtr.Zero;
+            SetPeek(IntPtr.Zero);
+        }
+
+        bool CanPeek(IntPtr h)
+        {
+            if (PeekEnabled == null || !PeekEnabled() || !Native.IsWindow(h)) return false;
+            Native.DwmGetWindowAttribute(h, Native.DWMWA_CLOAKED, out int cloaked, 4);
+            return cloaked == 0;   // not for windows on another desktop (there's nothing on this screen to show)
         }
 
         protected override bool ShowWithoutActivation => true;
@@ -60,6 +104,7 @@ namespace CLTaskbar
         {
             base.OnHandleCreated(e);
             Native.RoundCorners(Handle);
+            Native.ExcludeFromPeek(Handle);   // stays visible while it shows a window on the screen
         }
 
         protected override void WndProc(ref Message m)
@@ -194,6 +239,7 @@ namespace CLTaskbar
 
         void ClearThumbs()
         {
+            StopPeek();
             foreach (var t in tiles) if (t.Thumb != IntPtr.Zero) Native.DwmUnregisterThumbnail(t.Thumb);
             tiles.Clear();
         }
@@ -277,11 +323,13 @@ namespace CLTaskbar
         {
             var t = TileAt(e.Location);
             bool c = t != null && t.CloseRect.Contains(e.Location);
+            if (t != hoverTile) WantPeek(t);
             if (t != hoverTile || c != hoverClose) { hoverTile = t; hoverClose = c; Invalidate(); }
         }
 
         protected override void OnMouseLeave(EventArgs e)
         {
+            StopPeek();
             hoverTile = null; hoverClose = false; Invalidate();
         }
 
@@ -291,6 +339,7 @@ namespace CLTaskbar
             if (t == null) return;
             if (e.Button == MouseButtons.Middle || (e.Button == MouseButtons.Left && t.CloseRect.Contains(e.Location)))
             {
+                if (peeked == t.Win.Hwnd) StopPeek();
                 OnCloseWindow?.Invoke(t.Win);
                 return;
             }
@@ -303,7 +352,7 @@ namespace CLTaskbar
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) { ClearThumbs(); poll.Dispose(); titleFont?.Dispose(); }
+            if (disposing) { StopPeek(); overlay.Dispose(); ClearThumbs(); poll.Dispose(); peekTimer.Dispose(); titleFont?.Dispose(); }
             base.Dispose(disposing);
         }
     }

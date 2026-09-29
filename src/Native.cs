@@ -212,6 +212,31 @@ namespace CLTaskbar
         {
             try { int pref = 2; DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref pref, 4); } catch { }
         }
+
+        // Windows fades/zooms new windows in; popups should just appear, like the real taskbar's
+        public const int DWMWA_TRANSITIONS_FORCEDISABLED = 3;
+        public static void NoOpenAnimation(IntPtr hwnd)
+        {
+            try { int on = 1; DwmSetWindowAttribute(hwnd, DWMWA_TRANSITIONS_FORCEDISABLED, ref on, 4); } catch { }
+        }
+
+        // A window's visible frame on the screen (GetWindowRect also counts the invisible resize borders)
+        [DllImport("dwmapi.dll", EntryPoint = "DwmGetWindowAttribute")]
+        static extern int DwmGetWindowRectAttribute(IntPtr hwnd, int attr, out RECT value, int size);
+        const int DWMWA_EXTENDED_FRAME_BOUNDS = 9;
+        public static bool GetVisibleFrame(IntPtr hwnd, out RECT r)
+        {
+            try { if (DwmGetWindowRectAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, out r, Marshal.SizeOf(typeof(RECT))) == 0) return true; } catch { }
+            return GetWindowRect(hwnd, out r);
+        }
+        public const int DWM_TNP_RECTSOURCE = 0x2;
+
+        // Keeps a window visible while Windows' own "peek at desktop" is on (like the real taskbar)
+        public const int DWMWA_EXCLUDED_FROM_PEEK = 12;
+        public static void ExcludeFromPeek(IntPtr hwnd)
+        {
+            try { int on = 1; DwmSetWindowAttribute(hwnd, DWMWA_EXCLUDED_FROM_PEEK, ref on, 4); } catch { }
+        }
     }
 
     // ---- COM interfaces ----

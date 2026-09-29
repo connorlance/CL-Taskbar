@@ -498,7 +498,9 @@ namespace CLTaskbar
 
             Section("Previews");
             CheckRow("Show window previews when pointing at an app", () => cfg.ShowPreviews, v => cfg.ShowPreviews = v);
-            NumberRow("Delay (ms)", () => cfg.PreviewDelayMs, v => cfg.PreviewDelayMs = v, 350, "Default: 350 ms", true);
+            NumberRow("Delay (ms)", () => cfg.PreviewDelayMs, v => cfg.PreviewDelayMs = v, 0, "Default: 0 ms (instant)", true);
+            CheckRow("Pointing at a preview shows that window on the screen", () => cfg.PeekWindows, v => cfg.PeekWindows = v);
+            CheckRow("Show the name when pointing at a popup grid or menu", () => cfg.ShowGroupNames, v => cfg.ShowGroupNames = v);
 
             Section("Position");
             NumberRow("Left edge nudge", () => cfg.LeftOffset, v => cfg.LeftOffset = v, 0, "Positive moves it right", true, true);
@@ -540,8 +542,8 @@ namespace CLTaskbar
                     ("Reset appearance", () =>
                     {
                         var d = new Config();
-                        cfg.Color = d.Color; cfg.IconSize = 0; cfg.ButtonWidth = 0; cfg.SectionGap = d.SectionGap; cfg.ShowDividers = true;
-                        cfg.HighlightCurrentDesktop = true; cfg.ShowPreviews = true; cfg.PreviewDelayMs = d.PreviewDelayMs;
+                        cfg.Color = d.Color; cfg.IconSize = 0; cfg.ButtonWidth = 0; cfg.SectionGap = d.SectionGap; cfg.ShowDividers = d.ShowDividers;
+                        cfg.HighlightCurrentDesktop = true; cfg.ShowPreviews = true; cfg.PreviewDelayMs = d.PreviewDelayMs; cfg.ShowGroupNames = d.ShowGroupNames; cfg.PeekWindows = d.PeekWindows;
                         cfg.LeftOffset = 0; cfg.RightOffset = 0; cfg.HideWhenFullscreen = true; cfg.ShowTrayIcon = true;
                         cfg.HighlightColor = ""; cfg.IndicatorColor = ""; cfg.ActiveIndicatorColor = ""; cfg.ClickCyclesWindows = true;
                         Changed(); Later(() => ShowPage("appearance"));

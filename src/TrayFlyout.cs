@@ -48,6 +48,7 @@ namespace CLTaskbar
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
+            Native.NoOpenAnimation(Handle);
             if (!Theme.IsWin10) Native.RoundCorners(Handle);
         }
 
@@ -93,20 +94,31 @@ namespace CLTaskbar
             return p.X > rc.Left + rc.Width / 2 ? i + 1 : i;
         }
 
-        DateTime shownAt = DateTime.Now;
-        protected override void OnShown(EventArgs e) { base.OnShown(e); shownAt = DateTime.Now; }
-        protected override void OnDeactivate(EventArgs e)
+        // Closes when you switch to anything outside CL-Taskbar. If one of CL-Taskbar's own windows takes the focus
+        // instead (like a menu that was just closing handing it back to the bar), take it back and stay open.
+        // Opening another menu or grid from the bar closes this one on purpose first.
+        static readonly uint OwnPid = (uint)System.Diagnostics.Process.GetCurrentProcess().Id;
+        bool closing;
+        int takeBacks;
+        protected override void WndProc(ref Message m)
         {
-            base.OnDeactivate(e);
-            if (dragging) return;
-            // something (like a menu that was closing) took the focus the instant it opened: take it back
-            if ((DateTime.Now - shownAt).TotalMilliseconds < 350 && !IsDisposed)
+            const int WM_ACTIVATE = 0x0006, WA_INACTIVE = 0;
+            if (m.Msg == WM_ACTIVATE && (m.WParam.ToInt64() & 0xFFFF) == WA_INACTIVE && !closing && !dragging)
             {
-                BeginInvoke((Action)(() => { if (!IsDisposed) { Activate(); Native.SetForegroundWindow(Handle); } }));
-                return;
+                uint pid = 0;
+                if (m.LParam != IntPtr.Zero) Native.GetWindowThreadProcessId(m.LParam, out pid);
+                bool ours = pid == OwnPid && takeBacks < 5;   // (never fight forever)
+                if (ours) takeBacks++;
+                BeginInvoke((Action)(() =>
+                {
+                    if (closing || IsDisposed) return;
+                    if (ours) { Activate(); Native.SetForegroundWindow(Handle); }
+                    else Close();
+                }));
             }
-            Close();
+            base.WndProc(ref m);
         }
+        protected override void OnFormClosing(FormClosingEventArgs e) { closing = true; base.OnFormClosing(e); }
         protected override void OnKeyDown(KeyEventArgs e) { if (e.KeyCode == Keys.Escape) Close(); base.OnKeyDown(e); }
 
         protected override void OnMouseMove(MouseEventArgs e)

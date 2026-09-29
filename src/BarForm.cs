@@ -144,6 +144,7 @@ namespace CLTaskbar
             saveTimer.Tick += (s, e) => { saveTimer.Stop(); cfg.Save(); };
             burstTimer.Tick += (s, e) => { if (DateTime.Now > burstUntil) burstTimer.Stop(); ReassertTopmost(); };
             preview.OnActivate = w => Activate(w);
+            preview.PeekEnabled = () => cfg.PeekWindows;
             preview.OnCloseWindow = w => { CloseWindow(w.Hwnd); dirty = true; };
             Launcher.IconsChanged += () => { Invalidate(); };
             SetupTrayIcon();
@@ -176,6 +177,7 @@ namespace CLTaskbar
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
+            Native.ExcludeFromPeek(Handle);   // the bar stays visible while a preview shows a window on the screen
             shellMsg = Native.RegisterWindowMessage("SHELLHOOK");
             Native.RegisterShellHookWindow(Handle);
             winEventProc = OnWinEvent;
@@ -185,6 +187,7 @@ namespace CLTaskbar
             StartBadges();
             DesktopWatcher.Start(() => { try { if (IsHandleCreated && !IsDisposed) BeginInvoke((Action)DesktopMaybeChanged); } catch { } });
             BeginInvoke((Action)(() => { OnTick(); SampleColor(); }));
+            ScheduleIconWarmup();
         }
 
         protected override void WndProc(ref Message m)
@@ -263,6 +266,7 @@ namespace CLTaskbar
             Invalidate();
             if (saveNow) { saveTimer.Stop(); cfg.Save(); }
             else { saveTimer.Stop(); saveTimer.Start(); }
+            ScheduleIconWarmup();
         }
 
         // ================= Launcher.IWindowHost =================
